@@ -36,9 +36,10 @@ jobs:
         playwright install chromium
         playwright install-deps chromium
 
-    # 5. Execute your script to extract the 400+ UAE leads
+        # 5. Execute your script to extract the 400+ UAE leads
     - name: Run Scraper Engine Task
-      run: python trip.py
+      run: python $(find . -name "trip.py" -print -quit)
+
 
     # 6. Save the newly generated tripadvisor_output.csv back into your private GitHub files automatically
     - name: Save and Commit Extracted CSV File
