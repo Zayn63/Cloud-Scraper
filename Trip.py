@@ -10,9 +10,11 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 # ----------------------------- CONFIGURATION -----------------------------
 OUTPUT_CSV = "tripadvisor_output.csv"
 
-# CAPACITY SETTINGS: Crawls 60 pages to hunt down valid business emails
-MAX_LISTING_PAGES = 60          
-MAX_RESTAURANTS = 450           
+# FAST SPRINT SETTINGS: Walks through 25 deep listing pages
+MAX_LISTING_PAGES = 25          
+
+# TARGET OBJECTIVE: Scrapes exactly 400 brand-new restaurants this session and stops!
+MAX_RESTAURANTS = 400           
 
 NAV_TIMEOUT_MS = 45_000
 
@@ -70,8 +72,8 @@ def clean_mailto(href: str) -> str:
     try:
         parts = href.split("mailto:", 1)
         if len(parts) > 1:
-            email_part = parts[1].split("?", 1)
-            return unquote(email_part[0]).strip()
+            email_part = parts[1].split("?", 1)[0]
+            return unquote(email_part).strip()
     except Exception:
         pass
     return ""
@@ -180,7 +182,7 @@ def extract_restaurant(detail_page, url: str) -> dict:
 def run(target_url: str) -> pd.DataFrame:
     visited = set()
     
-    # ANTI-DUPLICATION ENGINE: Automatically reads past logs to protect links
+    # ANTI-DUPLICATION MODULE: Reads past spreadsheet entries to build a safety exclusion map
     if os.path.exists(OUTPUT_CSV):
         try:
             existing_df = pd.read_csv(OUTPUT_CSV)
@@ -200,7 +202,7 @@ def run(target_url: str) -> pd.DataFrame:
     with sync_playwright() as p:
         print("[*] Starting automation engine...")
         
-        # HEADLESS=TRUE: Configured for silent GitHub Action runner background layers
+        # HEADLESS=TRUE: Configured for silent GitHub Action background execution loops
         browser = p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"]
@@ -243,7 +245,7 @@ def run(target_url: str) -> pd.DataFrame:
                 finally:
                     detail_page.close()
 
-                # Appends new logs cleanly to the end of your growing CSV database
+                # Save instantly to your spreadsheet file
                 df.loc[len(df)] = [row["Restaurant Name"], row["Email"], row["URL"]]
                 df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
                 print(f"  [Session: {current_session_scraped} | Total: {len(df)}] {row['Restaurant Name'] or '(no name)'} -> {row['Email'] or 'no email found'}")
@@ -252,6 +254,3 @@ def run(target_url: str) -> pd.DataFrame:
 
             if current_session_scraped >= MAX_RESTAURANTS:
                 print(f"Reached current daily execution cap of {MAX_RESTAURANTS} new entries.")
-                break
-
-            if page_number < MAX_LISTING_PAGES:
