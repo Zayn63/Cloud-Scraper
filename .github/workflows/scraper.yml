@@ -1,55 +1,50 @@
-name: TripAdvisor Restaurant Scraper
+name: UAE Restaurant Lead Generation Engine
 
 on:
+  # Allows you to trigger the scraper manually by clicking a button anytime!
   workflow_dispatch:
-
-permissions:
-  contents: write
+  
+  # Optional: Automatically runs the scraper on a timer (e.g., every Monday at 6:00 AM)
+  # schedule:
+  #   - cron: '0 6 * * 1'
 
 jobs:
-  scrape:
+  scrape_data:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    # 1. Download the code from your repository into the runner memory
+    - name: Checkout Repository Data
+      uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+    # 2. Boot up a clean Python environment
+    - name: Initialize Python Core
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+    # 3. Install your libraries
+    - name: Install System Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-      - name: Install Chromium
-        run: python -m playwright install --with-deps chromium
+    # 4. Inject Google Chrome and background Linux graphics drivers
+    - name: Configure Playwright Web Drivers
+      run: |
+        playwright install chromium
+        playwright install-deps chromium
 
-      - name: Run scraper
-        run: python -u tripadvisor_scraper.py
+    # 5. Execute your script to extract the 400+ UAE leads
+    - name: Run Scraper Engine Task
+      run: python trip.py
 
-      - name: Upload master CSV
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tripadvisor-master-csv
-          path: pyt_name_email.csv
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Commit updated CSV
-        if: success()
-        run: |
-          if git diff --quiet -- pyt_name_email.csv; then
-            echo "No CSV changes to commit."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyt_name_email.csv
-          git commit -m "Update restaurant master CSV"
-          git push
+    # 6. Save the newly generated tripadvisor_output.csv back into your private GitHub files automatically
+    - name: Save and Commit Extracted CSV File
+      run: |
+        git config --global user.name "GitHub Actions Automation"
+        git config --global user.email "actions@github.com"
+        git add tripadvisor_output.csv
+        git commit -m "Automated Sync: Updated UAE Restaurant Lead Sheets [Skip CI]" || echo "No new listings found this run."
+        git push
