@@ -1,51 +1,43 @@
 name: UAE Restaurant Lead Generation Engine
 
 on:
-  # Allows you to trigger the scraper manually by clicking a button anytime!
   workflow_dispatch:
-  
-  # Optional: Automatically runs the scraper on a timer (e.g., every Monday at 6:00 AM)
-  # schedule:
-  #   - cron: '0 6 * * 1'
+
+permissions:
+  contents: write
 
 jobs:
   scrape_data:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Download the code from your repository into the runner memory
     - name: Checkout Repository Data
       uses: actions/checkout@v4
+      with:
+        persist-credentials: true
 
-    # 2. Boot up a clean Python environment
     - name: Initialize Python Core
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'
 
-    # 3. Install your libraries
     - name: Install System Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 4. Inject Google Chrome and background Linux graphics drivers
     - name: Configure Playwright Web Drivers
       run: |
         playwright install chromium
         playwright install-deps chromium
 
-        # 5. Execute your script to extract the 400+ UAE leads
     - name: Run Scraper Engine Task
       run: python $(find . -name "trip.py" -print -quit)
 
-
-    # 6. Save the newly generated tripadvisor_output.csv back into your private GitHub files automatically
-    - name: Save and Commit Extracted CSV File
-      run: |
-        git config --global user.name "GitHub Actions Automation"
-        git config --global user.email "actions@github.com"
-        git add tripadvisor_output.csv
-        git commit -m "Automated Sync: Updated UAE Restaurant Lead Sheets [Skip CI]" || echo "No new listings found this run."
-        git push
+    # 🚀 BULLETPROOF AUTOMATED CLOUD UPLOAD FIX
+    - name: Auto Save and Push CSV File Changes
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        commit_message: "Automated Sync: Updated UAE Restaurant Lead Sheets"
+        file_pattern: 'tripadvisor_output.csv'
