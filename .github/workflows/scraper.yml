@@ -27,16 +27,20 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    # 🆕 AUTOMATED SPACE CLEANER: Automatically fixes any layout errors before running
+    - name: Repair Script Format Spacing
+      run: |
+        pip install autopep8
+        autopep8 --in-place --aggressive --aggressive Trip.py
+
     - name: Configure Playwright Web Drivers
       run: |
         playwright install chromium
         playwright install-deps chromium
 
-    # 🚀 FIXED PATH EXECUTION: Direct trigger to run your clean script immediately
     - name: Run Scraper Engine Task
       run: python Trip.py
 
-    # 🚀 BULLETPROOF AUTOMATED CLOUD UPLOAD FIX
     - name: Auto Save and Push CSV File Changes
       uses: stefanzweifel/git-auto-commit-action@v5
       with:
