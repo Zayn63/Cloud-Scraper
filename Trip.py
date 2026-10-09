@@ -124,6 +124,18 @@ def go_to_next_listing_page(page) -> bool:
             continue
     return False
 
+def extract_restaurant_name_from_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        path_parts = parsed.path.split('-')
+        for part in path_parts:
+            if part.startswith('Reviews_') or part.startswith('Review_'):
+                name_parts = part.split('_')[1:]
+                return " ".join(name_parts).replace("_", " ").strip().lower()
+    except:
+        pass
+    return ""
+
 def extract_restaurant(detail_page, url: str) -> dict:
     result = {"Restaurant Name": "", "Email": "", "URL": url}
     try:
@@ -151,7 +163,7 @@ def extract_restaurant(detail_page, url: str) -> dict:
     if not result["Restaurant Name"]:
         try:
             title = detail_page.title()
-            result["Restaurant Name"] = title.split(" - ").split(",").strip()
+            result["Restaurant Name"] = title.split(" - ")[0].split(",")[0].strip()
         except Exception:
             result["Restaurant Name"] = "Unknown Restaurant"
 
@@ -180,30 +192,42 @@ def extract_restaurant(detail_page, url: str) -> dict:
     return result
 
 def run(target_url: str) -> pd.DataFrame:
-    visited = set()
+    # We now filter by both URL and Clean Restaurant Names to handle name-only lists safely
+    visited_urls = set()
+    visited_names = set()
     
-    # 🛡️ FORTIFIED MEMORY LOADER: Bulletproof checking that will never crash or exit silently
     if os.path.exists(OUTPUT_CSV) and os.path.getsize(OUTPUT_CSV) > 4:
         try:
             existing_df = pd.read_csv(OUTPUT_CSV)
-            # Safe checking for columns regardless of uppercase/lowercase variations
-            url_col = [c for c in existing_df.columns if c.upper() == 'URL']
+            
+            # Map by URL column if it exists
+            url_col = [c for c in existing_df.columns if c.strip().upper() == 'URL']
             if url_col:
                 for old_url in existing_df[url_col[0]].dropna():
-                    visited.add(str(old_url).strip())
-            print(f"[*] Loaded existing database successfully. Found {len(visited)} historical records.")
+                    visited_urls.add(str(old_url).strip().lower())
+                    
+            # Map by Restaurant Name column to protect your current two-column sheet format!
+            name_col = [c for c in existing_df.columns if 'NAME' in c.strip().upper() or 'RESTAURANT' in c.strip().upper()]
+            if name_col:
+                for old_name in existing_df[name_col[0]].dropna():
+                    # Strip out characters, spaces, quotes to create a clean matching footprint
+                    clean_n = re.sub(r'[^a-zA-Z0-9]', '', str(old_name)).lower().strip()
+                    if clean_n:
+                        visited_names.add(clean_n)
+                        
+            print(f"[*] Memory Engine Active: Loaded {max(len(visited_urls), len(visited_names))} historical records for duplicate skipping.")
             df = existing_df
         except Exception as e:
             print(f"[!] History read warning, starting fresh: {e}")
             df = pd.DataFrame(columns=["Restaurant Name", "Email", "URL"])
     else:
-        print("[*] No pre-existing history file found or file is empty. Starting fresh database structure.")
+        print("[*] Starting a brand-new database profile sheet structure.")
         df = pd.DataFrame(columns=["Restaurant Name", "Email", "URL"])
 
     current_session_scraped = 0
 
     with sync_playwright() as p:
-        print("[*] Starting automation browser engine...")
+        print("[*] Starting cloud automation browser engine...")
         browser = p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"]
@@ -227,31 +251,6 @@ def run(target_url: str) -> pd.DataFrame:
             smooth_scroll(listing_page)
 
             links = collect_listing_links(listing_page)
-            new_links = [u for u in links if u not in visited]
-            print(f"Found {len(links)} links on page, {len(new_links)} are brand new entries.")
-
-            for url in new_links:
-                if current_session_scraped >= MAX_RESTAURANTS:
-                    break
-                
-                visited.add(url)
-                current_session_scraped += 1
-
-                detail_page = context.new_page()
-                try:
-                    row = extract_restaurant(detail_page, url)
-                except Exception as exc:
-                    print(f"    error on {url}: {exc}")
-                    row = {"Restaurant Name": "", "Email": "", "URL": url}
-                finally:
-                    detail_page.close()
-
-                # Force write column structure to protect data types
-                new_row = {
-                    "Restaurant Name": row["Restaurant Name"],
-                    "Email": row["Email"],
-                    "URL": row["URL"]
-                }
-                
-                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+            
+            # 🆕 EXCLUSION LOOP: Filters links by checking both URL logs and link name structures
+            new_links = []
