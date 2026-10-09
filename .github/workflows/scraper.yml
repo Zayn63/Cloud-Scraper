@@ -34,7 +34,7 @@ jobs:
 
     # 🚀 FIXED PATH EXECUTION: Direct trigger to run your clean script immediately
     - name: Run Scraper Engine Task
-      run: python trip.py
+      run: python Trip.py
 
     # 🚀 BULLETPROOF AUTOMATED CLOUD UPLOAD FIX
     - name: Auto Save and Push CSV File Changes
