@@ -22,9 +22,9 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 IGNORED_EMAIL_DOMAINS = ("tripadvisor.", "sentry.", "example.", "wixpress.", "google.", "facebook.", "instagram.")
 IGNORED_EMAIL_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
 
-BASE_URL = "https://www.tripadvisor.com"
+BASE_URL = "https://tripadvisor.com"
 
-# 🛡️ ANTI-BOT SHIELD: emulates a real desktop browser to prevent TripAdvisor from blocking the cloud IP
+# 🛡️ ANTI-BOT SHIELD: Emulates a real desktop browser to prevent TripAdvisor firewall blocks
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 def smooth_scroll(page, step: int = 350, max_steps: int = 40) -> None:
@@ -63,11 +63,11 @@ def dismiss_popups(page) -> None:
 def wait_if_challenged(page) -> None:
     try:
         html = page.content().lower()
-    except Exception:
-        return
-    markers = ("captcha", "datadome", "verify you are human", "access denied")
-    if any(m in html for m in markers) and "restaurant" not in page.title().lower():
-        print(f"\n[!] Security challenge visible on screen. Title: '{page.title()}'")
+        markers = ("captcha", "datadome", "verify you are human", "access denied")
+        if any(m in html for m in markers) and "restaurant" not in page.title().lower():
+            print(f"\n[!] Challenge visible on screen. Title: '{page.title()}'")
+    except:
+        pass
 
 def clean_mailto(href: str) -> str:
     if not href or not isinstance(href, str) or "mailto:" not in href:
@@ -205,13 +205,11 @@ def run(target_url: str) -> pd.DataFrame:
         try:
             existing_df = pd.read_csv(OUTPUT_CSV)
             
-            # Map by URL if it exists
             url_col = [c for c in existing_df.columns if c.strip().upper() == 'URL']
             if url_col:
                 for old_url in existing_df[url_col[0]].dropna():
                     visited_urls.add(str(old_url).strip().lower())
                     
-            # 🛡️ FIXED SYNTAX: Completed the cut-off name filter loop cleanly
             name_col = [c for c in existing_df.columns if 'NAME' in c.strip().upper() or 'RESTAURANT' in c.strip().upper()]
             if name_col:
                 for old_name in existing_df[name_col[0]].dropna():
@@ -219,7 +217,7 @@ def run(target_url: str) -> pd.DataFrame:
                     if clean_n:
                         visited_names.add(clean_n)
                         
-            print(f"[*] Memory Database Active: Loaded {max(len(visited_urls), len(visited_names))} old rows for duplicate skipping.")
+            print(f"[*] Memory Database Active: Loaded {max(len(visited_urls), len(visited_names))} old records.")
             df = existing_df
         except Exception as e:
             print(f"[!] History initialization error, starting fresh: {e}")
@@ -234,7 +232,6 @@ def run(target_url: str) -> pd.DataFrame:
         print("[*] Launching Chromium Cloud Core Engine...")
         browser = p.chromium.launch(headless=True)
         
-        # Inject standard human screen parameters and device fingerprints
         context = browser.new_context(
             user_agent=USER_AGENT,
             viewport={"width": 1440, "height": 900},
@@ -254,4 +251,10 @@ def run(target_url: str) -> pd.DataFrame:
             return df
 
         for page_number in range(1, MAX_LISTING_PAGES + 1):
+            print(f"\n--- Processing Listing Page {page_number} ---")
+            smooth_scroll(listing_page)
 
+            links = collect_listing_links(listing_page)
+            
+            new_links = []
+            for u in links:
