@@ -2,6 +2,7 @@ import random
 import re
 import sys
 import os
+import time
 from urllib.parse import unquote, urljoin, urlparse
 import pandas as pd
 from playwright.sync_api import sync_playwright
@@ -19,8 +20,107 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 IGNORED_EMAIL_DOMAINS = ("tripadvisor.", "sentry.", "example.", "wixpress.", "google.", "facebook.", "instagram.")
 IGNORED_EMAIL_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
 BASE_URL = "https://tripadvisor.com"
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 COLUMNS = ["Restaurant Name", "Email", "URL"]
+DEBUG_DIR = "debug"
+LISTING_SELECTOR = "a[href*='/Restaurant_Review-']"
+DETAIL_SELECTOR = "h1"
+
+LAUNCH_ARGS = [
+    "--disable-blink-features=AutomationControlled",   # removes the automation flag Chromium exposes
+    "--no-sandbox",
+    "--disable-dev-shm-usage",                          # CI runners have a tiny /dev/shm
+    "--window-size=1440,900",
+]
+
+# Patches the most common headless-browser giveaways before any page script runs.
+STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+window.chrome = window.chrome || {runtime: {}};
+const _q = window.navigator.permissions && window.navigator.permissions.query;
+if (_q) {
+  window.navigator.permissions.query = (p) => p.name === 'notifications'
+    ? Promise.resolve({state: Notification.permission})
+    : _q.call(window.navigator.permissions, p);
+}
+"""
+
+
+def launch_browser(p):
+    """Headed Chromium when a display exists (use xvfb-run in CI), else new-style headless."""
+    has_display = bool(os.environ.get("DISPLAY"))
+    headless = (not has_display) or os.environ.get("HEADLESS") == "1"
+    kwargs = {"headless": headless, "args": LAUNCH_ARGS}
+    if headless:
+        kwargs["channel"] = "chromium"   # full Chromium in new headless mode, not the stripped headless shell
+    print(f"[*] Browser mode: {'headless(new)' if headless else 'headed (xvfb)'}")
+    try:
+        return p.chromium.launch(**kwargs)
+    except Exception as e:
+        print(f"[!] Launch with channel failed ({e}); falling back to default.")
+        kwargs.pop("channel", None)
+        return p.chromium.launch(**kwargs)
+
+
+def make_context(browser):
+    # UA is built from the real browser version and the real OS, so UA, platform and client hints agree.
+    ua = f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{browser.version} Safari/537.36"
+    context = browser.new_context(
+        user_agent=ua,
+        viewport={"width": 1440, "height": 900},
+        locale="en-US",
+        extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
+    )
+    context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
+    context.add_init_script(STEALTH_JS)
+    return context
+
+
+def is_blocked(page, expect_selector):
+    """Blocked = bad title, or the content we expect to see is simply not there."""
+    try:
+        title = page.title().lower().strip()
+        if title in ("", "tripadvisor.com") or "access denied" in title:
+            return True
+        return page.locator(expect_selector).count() == 0
+    except Exception:
+        return True
+
+
+def save_debug(page, name):
+    try:
+        os.makedirs(DEBUG_DIR, exist_ok=True)
+        page.screenshot(path=os.path.join(DEBUG_DIR, f"{name}.png"), full_page=True)
+        with open(os.path.join(DEBUG_DIR, f"{name}.html"), "w", encoding="utf-8") as f:
+            f.write(page.content())
+    except Exception:
+        pass
+
+
+def open_listing(browser, target_url, attempts=4):
+    """Try to load the listing page; every retry uses a brand-new context (fresh cookies and session)."""
+    for attempt in range(1, attempts + 1):
+        context = make_context(browser)
+        page = context.new_page()
+        print(f"[*] Connecting to Target directory URL (attempt {attempt}/{attempts}): {target_url}")
+        try:
+            page.goto(target_url, wait_until="domcontentloaded")
+            page.wait_for_timeout(random.randint(6000, 9000))
+            dismiss_popups(page)
+            try:
+                page.wait_for_selector(LISTING_SELECTOR, state="attached", timeout=20_000)
+            except Exception:
+                pass
+            print(f"[*] Landed Page Title: '{page.title()}'")
+            if not is_blocked(page, LISTING_SELECTOR):
+                return context, page
+        except Exception as e:
+            print(f"[!] Load error: {e}")
+        save_debug(page, f"blocked_listing_{attempt}")
+        context.close()
+        time.sleep(random.randint(20, 45) * attempt)   # back off a little more each time
+    return None, None
 
 
 def smooth_scroll(page, step=350, max_steps=40):
@@ -140,11 +240,19 @@ def footprint(text):
 
 
 def extract_restaurant(detail_page, url):
-    result = {"Restaurant Name": "", "Email": "", "URL": url}
+    result = {"Restaurant Name": "", "Email": "", "URL": url, "Blocked": False}
     try:
         detail_page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
         detail_page.wait_for_timeout(3000)
+        try:
+            detail_page.wait_for_selector(DETAIL_SELECTOR, state="attached", timeout=10_000)
+        except Exception:
+            pass
         wait_if_challenged(detail_page)
+        if is_blocked(detail_page, DETAIL_SELECTOR):
+            result["Blocked"] = True
+            save_debug(detail_page, f"blocked_detail_{int(time.time())}")
+            return result
         dismiss_popups(detail_page)
         smooth_scroll(detail_page)
         for selector in ("h1[data-test-target='top-info-header']", "h1"):
@@ -212,23 +320,17 @@ def load_history():
 def run(target_url):
     df, visited_urls, visited_names = load_history()
     current_session_scraped = 0
+    consecutive_blocks = 0
+    stop = False
 
     with sync_playwright() as p:
         print("[*] Launching Chromium Cloud Core Engine...")
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(user_agent=USER_AGENT, viewport={"width": 1440, "height": 900}, locale="en-US")
-        context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
-        listing_page = context.new_page()
-
-        print(f"[*] Connecting to Target directory URL: {target_url}")
-        listing_page.goto(target_url, wait_until="domcontentloaded")
-        listing_page.wait_for_timeout(5000)
-        dismiss_popups(listing_page)
-        print(f"[*] Landed Page Title: '{listing_page.title()}'")
-        if "access denied" in listing_page.title().lower():
-            print("[!] Cloud IP blocked by firewall. Exiting safely.")
+        browser = launch_browser(p)
+        context, listing_page = open_listing(browser, target_url)
+        if listing_page is None:
+            print("[!] Listing page never loaded after all attempts (see debug/ for screenshots). Exiting with error.")
             browser.close()
-            return df
+            sys.exit(1)
 
         for page_number in range(1, MAX_LISTING_PAGES + 1):
             print(f"\n--- Processing Listing Page {page_number} ---")
@@ -257,6 +359,17 @@ def run(target_url):
                 finally:
                     detail_page.close()
 
+                if row.get("Blocked"):
+                    consecutive_blocks += 1
+                    print(f"  [!] Blocked on detail page ({consecutive_blocks}/3): {url}")
+                    if consecutive_blocks >= 3:
+                        print("[!] Too many consecutive blocks. Stopping; progress is already saved to CSV.")
+                        stop = True
+                        break
+                    listing_page.wait_for_timeout(random.randint(30_000, 60_000))
+                    continue
+                consecutive_blocks = 0
+
                 scraped_fp = footprint(row["Restaurant Name"])
                 if scraped_fp and scraped_fp in visited_names:
                     continue
@@ -274,7 +387,7 @@ def run(target_url):
                 print(f"  [Session: {current_session_scraped} | Total: {len(df)}] {row['Restaurant Name']} -> {row['Email'] or 'no email found'}")
                 listing_page.wait_for_timeout(random.randint(2000, 4000))
 
-            if current_session_scraped >= MAX_RESTAURANTS:
+            if stop or current_session_scraped >= MAX_RESTAURANTS:
                 break
 
             # FIX: this block was missing its body (the cause of the IndentationError)
