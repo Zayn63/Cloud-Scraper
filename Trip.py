@@ -72,7 +72,7 @@ def clean_mailto(href: str) -> str:
     try:
         parts = href.split("mailto:", 1)
         if len(parts) > 1:
-            email_part = parts[1].split("?", 1)[0]
+            email_part = parts.split("?", 1)
             return unquote(email_part).strip()
     except Exception:
         pass
@@ -151,7 +151,7 @@ def extract_restaurant(detail_page, url: str) -> dict:
     if not result["Restaurant Name"]:
         try:
             title = detail_page.title()
-            result["Restaurant Name"] = title.split(" - ")[0].split(",")[0].strip()
+            result["Restaurant Name"] = title.split(" - ").split(",").strip()
         except Exception:
             result["Restaurant Name"] = "Unknown Restaurant"
 
@@ -182,27 +182,28 @@ def extract_restaurant(detail_page, url: str) -> dict:
 def run(target_url: str) -> pd.DataFrame:
     visited = set()
     
-    # ANTI-DUPLICATION MODULE: Reads past spreadsheet entries to build an exclusion map [clean_trip.py]
-    if os.path.exists(OUTPUT_CSV):
+    # 🛡️ FORTIFIED MEMORY LOADER: Bulletproof checking that will never crash or exit silently
+    if os.path.exists(OUTPUT_CSV) and os.path.getsize(OUTPUT_CSV) > 4:
         try:
             existing_df = pd.read_csv(OUTPUT_CSV)
-            if "URL" in existing_df.columns:
-                for old_url in existing_df["URL"].dropna():
+            # Safe checking for columns regardless of uppercase/lowercase variations
+            url_col = [c for c in existing_df.columns if c.upper() == 'URL']
+            if url_col:
+                for old_url in existing_df[url_col[0]].dropna():
                     visited.add(str(old_url).strip())
-            print(f"[*] Loaded existing database. Found {len(visited)} historical links to protect against duplicates.")
+            print(f"[*] Loaded existing database successfully. Found {len(visited)} historical records.")
             df = existing_df
         except Exception as e:
-            print(f"[!] Warning reading historical CSV file, starting fresh: {e}")
+            print(f"[!] History read warning, starting fresh: {e}")
             df = pd.DataFrame(columns=["Restaurant Name", "Email", "URL"])
     else:
+        print("[*] No pre-existing history file found or file is empty. Starting fresh database structure.")
         df = pd.DataFrame(columns=["Restaurant Name", "Email", "URL"])
 
     current_session_scraped = 0
 
     with sync_playwright() as p:
-        print("[*] Starting automation engine...")
-        
-        # HEADLESS=TRUE: Configured for silent GitHub Action background execution loops [clean_trip.py]
+        print("[*] Starting automation browser engine...")
         browser = p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"]
@@ -245,11 +246,12 @@ def run(target_url: str) -> pd.DataFrame:
                 finally:
                     detail_page.close()
 
-                # Save instantly to your spreadsheet file
-                df.loc[len(df)] = [row["Restaurant Name"], row["Email"], row["URL"]]
-                df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
-                print(f"  [Session: {current_session_scraped} | Total: {len(df)}] {row['Restaurant Name'] or '(no name)'} -> {row['Email'] or 'no email found'}")
+                # Force write column structure to protect data types
+                new_row = {
+                    "Restaurant Name": row["Restaurant Name"],
+                    "Email": row["Email"],
+                    "URL": row["URL"]
+                }
                 
-                listing_page.wait_for_timeout(random.randint(3500, 7000))
-
-            if current_session_scraped >= MAX_RESTAURANTS:
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
