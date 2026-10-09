@@ -9,25 +9,17 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 # ----------------------------- CONFIGURATION -----------------------------
 OUTPUT_CSV = "tripadvisor_output.csv"
-
-# FAST SPRINT SETTINGS: Walks through 25 deep listing pages
 MAX_LISTING_PAGES = 25          
-
-# TARGET OBJECTIVE: Scrapes exactly 400 brand-new restaurants this session and stops!
 MAX_RESTAURANTS = 400           
-
 NAV_TIMEOUT_MS = 45_000
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 IGNORED_EMAIL_DOMAINS = ("tripadvisor.", "sentry.", "example.", "wixpress.", "google.", "facebook.", "instagram.")
 IGNORED_EMAIL_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
-
 BASE_URL = "https://tripadvisor.com"
-
-# 🛡️ ANTI-BOT SHIELD: Emulates a real desktop browser to prevent TripAdvisor firewall blocks
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
-def smooth_scroll(page, step: int = 350, max_steps: int = 40) -> None:
+def smooth_scroll(page, step=350, max_steps=40):
     try:
         viewport = page.viewport_size or {"width": 1280, "height": 800}
         page.mouse.move(viewport["width"] / 2, viewport["height"] / 2)
@@ -40,221 +32,181 @@ def smooth_scroll(page, step: int = 350, max_steps: int = 40) -> None:
             position = page.evaluate("window.scrollY + window.innerHeight")
             if position >= height - 5:
                 stagnant_rounds = stagnant_rounds + 1 if height == last_height else 0
-                if stagnant_rounds >= 2:
-                    break
+                if stagnant_rounds >= 2: break
             last_height = height
         page.wait_for_timeout(random.randint(1500, 3000))
         page.mouse.wheel(0, -random.randint(300, 700))
-        page.wait_for_timeout(random.randint(500, 1200))
-    except:
-        pass
+    except: pass
 
-def dismiss_popups(page) -> None:
-    candidates = ["#onetrust-accept-btn-handler", "button:has-text('Accept all')", "button:has-text('I Accept')", "button[aria-label='Close']"]
-    for selector in candidates:
+def dismiss_popups(page):
+    for selector in ["#onetrust-accept-btn-handler", "button:has-text('Accept all')", "button[aria-label='Close']"]:
         try:
             button = page.locator(selector).first
             if button.count() > 0 and button.is_visible():
-                button.click(timeout=2_000)
-                page.wait_for_timeout(random.randint(600, 1200))
-        except Exception:
-            continue
+                button.click(timeout=2000)
+                page.wait_for_timeout(500)
+        except: continue
 
-def wait_if_challenged(page) -> None:
+def wait_if_challenged(page):
     try:
         html = page.content().lower()
-        markers = ("captcha", "datadome", "verify you are human", "access denied")
-        if any(m in html for m in markers) and "restaurant" not in page.title().lower():
-            print(f"\n[!] Challenge visible on screen. Title: '{page.title()}'")
-    except:
-        pass
+        if any(m in html for m in ["captcha", "datadome", "verify you are human"]):
+            print(f"[!] Security challenge visible on screen. Title: '{page.title()}'")
+    except: pass
 
-def clean_mailto(href: str) -> str:
-    if not href or not isinstance(href, str) or "mailto:" not in href:
-        return ""
+def clean_mailto(href):
+    if not href or "mailto:" not in href: return ""
     try:
         parts = href.split("mailto:", 1)
-        if len(parts) > 1:
-            email_part = parts[1].split("?", 1)[0]
-            return unquote(email_part).strip()
-    except Exception:
-        pass
+        if len(parts) > 1: return unquote(parts.split("?", 1)).strip()
+    except: pass
     return ""
 
-def is_valid_email(address: str) -> bool:
-    if not address or "@" not in address:
-        return False
+def is_valid_email(address):
+    if not address or "@" not in address: return False
     lowered = address.lower()
-    if lowered.endswith(IGNORED_EMAIL_SUFFIXES):
-        return False
+    if lowered.endswith(IGNORED_EMAIL_SUFFIXES): return False
     domain = lowered.split("@")[-1]
     return not any(domain.startswith(bad) or bad in domain for bad in IGNORED_EMAIL_DOMAINS)
 
-def collect_listing_links(page) -> list[str]:
+def collect_listing_links(page):
     anchors = page.query_selector_all("a[href*='/Restaurant_Review-']")
     links = []
     seen = set()
     for anchor in anchors:
         try:
             href = anchor.get_attribute("href")
-            if not href:
-                continue
+            if not href: continue
             absolute = urljoin(BASE_URL, href)
             parsed = urlparse(absolute)
             canonical = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-            if canonical in seen:
-                continue
-            seen.add(canonical)
-            links.append(canonical)
-        except:
-            continue
+            if canonical not in seen:
+                seen.add(canonical)
+                links.append(canonical)
+        except: continue
     return links
 
-def go_to_next_listing_page(page) -> bool:
-    next_selectors = ["a[aria-label='Next page']", "a.nav.next", "a[data-smoothing='true']:has-text('Next')", "a:has-text('Next')"]
-    for selector in next_selectors:
+def go_to_next_listing_page(page):
+    for selector in ["a[aria-label='Next page']", "a.nav.next", "a:has-text('Next')"]:
         locator = page.locator(selector).first
         try:
-            if locator.count() == 0:
-                continue
-            disabled = locator.get_attribute("aria-disabled")
-            if disabled == "true":
-                return False
-            locator.scroll_into_view_if_needed(timeout=3_000)
-            page.wait_for_timeout(random.randint(1500, 3000))
-            locator.click(timeout=5_000)
+            if locator.count() == 0: continue
+            if locator.get_attribute("aria-disabled") == "true": return False
+            locator.scroll_into_view_if_needed(timeout=3000)
+            page.wait_for_timeout(1500)
+            locator.click(timeout=5000)
             page.wait_for_load_state("domcontentloaded")
-            page.wait_for_timeout(random.randint(3500, 7000))
             return True
-        except Exception:
-            continue
+        except: continue
     return False
 
-def extract_restaurant_name_from_url(url: str) -> str:
+def extract_restaurant_name_from_url(url):
     try:
         parsed = urlparse(url)
-        path_parts = parsed.path.split('-')
-        for part in path_parts:
+        for part in parsed.path.split('-'):
             if part.startswith('Reviews_') or part.startswith('Review_'):
-                name_parts = part.split('_')[1:]
-                return " ".join(name_parts).replace("_", " ").strip().lower()
-    except:
-        pass
+                return " ".join(part.split('_')[1:]).replace("_", " ").strip().lower()
+    except: pass
     return ""
 
-def extract_restaurant(detail_page, url: str) -> dict:
+def extract_restaurant(detail_page, url):
     result = {"Restaurant Name": "", "Email": "", "URL": url}
     try:
         detail_page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-    except PlaywrightTimeout:
-        print(f"    timeout loading {url}")
-        return result
-
-    detail_page.wait_for_timeout(random.randint(3500, 7000))
-    wait_if_challenged(detail_page)
-    dismiss_popups(detail_page)
-    smooth_scroll(detail_page)
-
-    for selector in ("h1[data-test-target='top-info-header']", "h1"):
-        heading = detail_page.locator(selector).first
-        try:
+        detail_page.wait_for_timeout(3000)
+        wait_if_challenged(detail_page)
+        dismiss_popups(detail_page)
+        smooth_scroll(detail_page)
+        for selector in ("h1[data-test-target='top-info-header']", "h1"):
+            heading = detail_page.locator(selector).first
             if heading.count() > 0:
-                text = heading.inner_text(timeout=3_000).strip()
-                if text:
-                    result["Restaurant Name"] = text
-                    break
-        except Exception:
-            continue
-
+                text = heading.inner_text(timeout=3000).strip()
+                if text: result["Restaurant Name"] = text; break
+    except: return result
     if not result["Restaurant Name"]:
-        try:
-            title = detail_page.title()
-            result["Restaurant Name"] = title.split(" - ")[0].split(",")[0].strip()
-        except Exception:
-            result["Restaurant Name"] = "Unknown Restaurant"
-
+        try: result["Restaurant Name"] = detail_page.title().split(" - ").strip()
+        except: result["Restaurant Name"] = "Unknown Restaurant"
     try:
         body_text = detail_page.locator("body").inner_text()
-        found_emails = EMAIL_RE.findall(body_text)
-        for email_addr in found_emails:
-            if is_valid_email(email_addr):
-                result["Email"] = email_addr
-                return result
-    except Exception:
-        pass
-
+        for email_addr in EMAIL_RE.findall(body_text):
+            if is_valid_email(email_addr): result["Email"] = email_addr; return result
+    except: pass
     try:
-        mailto_anchors = detail_page.query_selector_all("a[href^='mailto:']")
-        for anchor in mailto_anchors:
+        for anchor in detail_page.query_selector_all("a[href^='mailto:']"):
             href = anchor.get_attribute("href")
             if href:
                 address = clean_mailto(href)
-                if address and is_valid_email(address):
-                    result["Email"] = address
-                    return result
-    except Exception:
-        pass
-
+                if address and is_valid_email(address): result["Email"] = address; return result
+    except: pass
     return result
 
-def run(target_url: str) -> pd.DataFrame:
+def run(target_url):
     visited_urls = set()
     visited_names = set()
-    
     if os.path.exists(OUTPUT_CSV) and os.path.getsize(OUTPUT_CSV) > 4:
         try:
             existing_df = pd.read_csv(OUTPUT_CSV)
-            
             url_col = [c for c in existing_df.columns if c.strip().upper() == 'URL']
             if url_col:
-                for old_url in existing_df[url_col[0]].dropna():
-                    visited_urls.add(str(old_url).strip().lower())
-                    
+                for old_url in existing_df[url_col].dropna(): visited_urls.add(str(old_url).strip().lower())
             name_col = [c for c in existing_df.columns if 'NAME' in c.strip().upper() or 'RESTAURANT' in c.strip().upper()]
             if name_col:
-                for old_name in existing_df[name_col[0]].dropna():
+                for old_name in existing_df[name_col].dropna():
                     clean_n = re.sub(r'[^a-zA-Z0-9]', '', str(old_name)).lower().strip()
-                    if clean_n:
-                        visited_names.add(clean_n)
-                        
-            print(f"[*] Memory Database Active: Loaded {max(len(visited_urls), len(visited_names))} old records.")
+                    if clean_n: visited_names.add(clean_n)
+            print(f"[*] Memory Database Active: Loaded {max(len(visited_urls), len(visited_names))} old rows.")
             df = existing_df
         except Exception as e:
-            print(f"[!] History initialization error, starting fresh: {e}")
+            print(f"[!] History initialization error: {e}")
             df = pd.DataFrame(columns=["Restaurant Name", "Email", "URL"])
     else:
-        print("[*] Starting fresh tracking spreadsheet profile.")
         df = pd.DataFrame(columns=["Restaurant Name", "Email", "URL"])
-
     current_session_scraped = 0
-
     with sync_playwright() as p:
         print("[*] Launching Chromium Cloud Core Engine...")
         browser = p.chromium.launch(headless=True)
-        
-        context = browser.new_context(
-            user_agent=USER_AGENT,
-            viewport={"width": 1440, "height": 900},
-            locale="en-US"
-        )
+        context = browser.new_context(user_agent=USER_AGENT, viewport={"width": 1440, "height": 900}, locale="en-US")
         context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
         listing_page = context.new_page()
-
         print(f"[*] Connecting to Target directory URL: {target_url}")
         listing_page.goto(target_url, wait_until="domcontentloaded")
         listing_page.wait_for_timeout(5000)
         dismiss_popups(listing_page)
-        
         print(f"[*] Landed Page Title: '{listing_page.title()}'")
         if "access denied" in listing_page.title().lower():
-            print("[!] Cloud IP blocked by firewall. Exiting process safely.")
+            print("[!] Cloud IP blocked by firewall. Exiting safely.")
             return df
-
         for page_number in range(1, MAX_LISTING_PAGES + 1):
             print(f"\n--- Processing Listing Page {page_number} ---")
             smooth_scroll(listing_page)
-
             links = collect_listing_links(listing_page)
             
+            # 🚀 FIXED LOOP SPACING STRUCTURE NATIVELY
             new_links = []
             for u in links:
+                if u.lower().strip() in visited_urls: continue
+                url_name_footprint = re.sub(r'[^a-zA-Z0-9]', '', extract_restaurant_name_from_url(u))
+                if url_name_footprint in visited_names: continue
+                new_links.append(u)
+                
+            print(f"Found {len(links)} links on page, {len(new_links)} are brand new entries.")
+            for url in new_links:
+                if current_session_scraped >= MAX_RESTAURANTS: break
+                detail_page = context.new_page()
+                try: row = extract_restaurant(detail_page, url)
+                except: continue
+                finally: detail_page.close()
+                scraped_name_footprint = re.sub(r'[^a-zA-Z0-9]', '', str(row["Restaurant Name"])).lower().strip()
+                if scraped_name_footprint in visited_names: continue
+                visited_urls.add(url.lower().strip())
+                if scraped_name_footprint: visited_names.add(scraped_name_footprint)
+                current_session_scraped += 1
+                new_row = {"Restaurant Name": row["Restaurant Name"], "Email": row["Email"], "URL": row["URL"]}
+                for col in ["Restaurant Name", "Email", "URL"]:
+                    if col not in df.columns: df[col] = None
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+                print(f"  [Session: {current_session_scraped} | Total: {len(df)}] {row['Restaurant Name']} -> {row['Email'] or 'no email found'}")
+                listing_page.wait_for_timeout(random.randint(2000, 4000))
+            if current_session_scraped >= MAX_RESTAURANTS: break
+            if page_number < MAX_LISTING_PAGES:
