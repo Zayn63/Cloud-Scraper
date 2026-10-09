@@ -32,8 +32,9 @@ jobs:
         playwright install chromium
         playwright install-deps chromium
 
+    # 🚀 FIXED PATH EXECUTION: Direct trigger to run your clean script immediately
     - name: Run Scraper Engine Task
-      run: python $(find . -name "trip.py" -print -quit)
+      run: python trip.py
 
     # 🚀 BULLETPROOF AUTOMATED CLOUD UPLOAD FIX
     - name: Auto Save and Push CSV File Changes
