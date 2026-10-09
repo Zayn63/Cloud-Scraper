@@ -182,7 +182,7 @@ def extract_restaurant(detail_page, url: str) -> dict:
 def run(target_url: str) -> pd.DataFrame:
     visited = set()
     
-    # ANTI-DUPLICATION MODULE: Reads past spreadsheet entries to build a safety exclusion map
+    # ANTI-DUPLICATION MODULE: Reads past spreadsheet entries to build an exclusion map [clean_trip.py]
     if os.path.exists(OUTPUT_CSV):
         try:
             existing_df = pd.read_csv(OUTPUT_CSV)
@@ -202,7 +202,7 @@ def run(target_url: str) -> pd.DataFrame:
     with sync_playwright() as p:
         print("[*] Starting automation engine...")
         
-        # HEADLESS=TRUE: Configured for silent GitHub Action background execution loops
+        # HEADLESS=TRUE: Configured for silent GitHub Action background execution loops [clean_trip.py]
         browser = p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"]
@@ -253,4 +253,3 @@ def run(target_url: str) -> pd.DataFrame:
                 listing_page.wait_for_timeout(random.randint(3500, 7000))
 
             if current_session_scraped >= MAX_RESTAURANTS:
-                print(f"Reached current daily execution cap of {MAX_RESTAURANTS} new entries.")
