@@ -70,7 +70,7 @@ def clean_mailto(href: str) -> str:
     try:
         parts = href.split("mailto:", 1)
         if len(parts) > 1:
-            email_part = parts.split("?", 1)
+            email_part = parts[1].split("?", 1)[0]
             return unquote(email_part).strip()
     except Exception:
         pass
@@ -149,7 +149,7 @@ def extract_restaurant(detail_page, url: str) -> dict:
     if not result["Restaurant Name"]:
         try:
             title = detail_page.title()
-            result["Restaurant Name"] = title.split(" - ").split(",").strip()
+            result["Restaurant Name"] = title.split(" - ")[0].split(",")[0].strip()
         except Exception:
             result["Restaurant Name"] = "Unknown Restaurant"
 
@@ -178,7 +178,7 @@ def extract_restaurant(detail_page, url: str) -> dict:
 def run(target_url: str) -> pd.DataFrame:
     visited = set()
     
-    # 🆕 ANTI-DUPLICATION ENGINE: Automatically reads past logs to memorize and protect links
+    # ANTI-DUPLICATION ENGINE: Automatically reads past logs to protect links
     if os.path.exists(OUTPUT_CSV):
         try:
             existing_df = pd.read_csv(OUTPUT_CSV)
@@ -198,7 +198,7 @@ def run(target_url: str) -> pd.DataFrame:
     with sync_playwright() as p:
         print("[*] Starting automation engine...")
         
-        # 🚀 HEADLESS=TRUE: Configured for silent GitHub Action runner background layers
+        # HEADLESS=TRUE: Configured for silent GitHub Action runner background layers
         browser = p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled"]
@@ -253,3 +253,4 @@ def run(target_url: str) -> pd.DataFrame:
                 break
 
             if page_number < MAX_LISTING_PAGES:
+                if not go_to_next_listing_page(listing_page):
