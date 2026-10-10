@@ -1,0 +1,61 @@
+name: TripAdvisor Scraper (Oxylabs Web API)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "TripAdvisor listing URL to scrape"
+        default: "https://www.tripadvisor.com/Restaurants-g295424-Dubai_Emirate_of_Dubai.html"
+      start_page:
+        description: "Listing page to start from (use 1 for a new area; higher to skip pages already done)"
+        default: "1"
+      max_restaurants:
+        description: "Max restaurants this run (20 = cheap test)"
+        default: "20"
+      concurrency:
+        description: "Parallel API requests (start at 5)"
+        default: "5"
+      run_js_detail:
+        description: "Render JavaScript on restaurant pages? 0 = no (cheaper), 1 = yes"
+        default: "0"
+
+permissions:
+  contents: write             # needed to commit tripadvisor_output.csv back to the repo
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pandas pyarrow requests
+
+      - name: Run scraper
+        env:
+          OXYLABS_WEB_API_KEY: ${{ secrets.OXYLABS_WEB_API_KEY }}
+          TARGET_URL: ${{ inputs.target_url }}
+          MAX_RESTAURANTS: ${{ inputs.max_restaurants }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          RUN_JS_DETAIL: ${{ inputs.run_js_detail }}
+          START_PAGE: ${{ inputs.start_page }}
+          MAX_LISTING_PAGES: "100"
+          MAX_RUNTIME_MIN: "330"
+        run: python Trip_api.py
+
+      - name: Commit results
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tripadvisor_output.csv
+          git diff --staged --quiet || git commit -m "Update scraped data"
+          git push
