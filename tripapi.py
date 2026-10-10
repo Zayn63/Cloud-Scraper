@@ -71,6 +71,16 @@ def out_of_time():
     return (time.time() - START_TIME) > MAX_RUNTIME_MIN * 60
 
 
+def restaurant_id(url):
+    m = re.search(r"-d(\d+)-", str(url))
+    return m.group(1) if m else ""
+
+
+def url_key(url):
+    """Stable key for a restaurant: its TripAdvisor ID (ignores www / http / path differences)."""
+    return restaurant_id(url) or str(url).strip().lower()
+
+
 def footprint(text):
     return re.sub(r"[^a-zA-Z0-9]", "", str(text)).lower().strip()
 
@@ -191,7 +201,7 @@ def load_history():
             existing = pd.read_csv(OUTPUT_CSV)
             url_cols = [c for c in existing.columns if c.strip().upper() == "URL"]
             if url_cols:
-                visited_urls = {str(u).strip().lower() for u in existing[url_cols[0]].dropna()}
+                visited_urls = {url_key(u) for u in existing[url_cols[0]].dropna()}
             name_cols = [c for c in existing.columns if "NAME" in c.strip().upper() or "RESTAURANT" in c.strip().upper()]
             if name_cols:
                 visited_names = {footprint(n) for n in existing[name_cols[0]].dropna() if footprint(n)}
@@ -242,7 +252,7 @@ def run(target_url):
 
         new_links = []
         for u in links:
-            if u.lower().strip() in visited_urls:
+            if url_key(u) in visited_urls:
                 continue
             fp = footprint(extract_name_from_url(u))
             if fp and fp in visited_names:
@@ -283,7 +293,7 @@ def run(target_url):
                 consecutive_failures = 0
 
                 fp = footprint(row["Restaurant Name"])
-                visited_urls.add(url.lower().strip())
+                visited_urls.add(url_key(url))
                 if fp and fp in visited_names:
                     continue
                 if fp:
