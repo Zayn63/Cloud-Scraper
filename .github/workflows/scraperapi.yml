@@ -22,6 +22,11 @@ on:
 permissions:
   contents: write             # needed to commit tripadvisor_output.csv back to the repo
 
+# Prevents two scraper runs from overlapping and pushing at the same time
+concurrency:
+  group: scraper
+  cancel-in-progress: false
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -57,5 +62,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add tripadvisor_output.csv
-          git diff --staged --quiet || git commit -m "Update scraped data"
-          git push
+          git diff --staged --quiet && exit 0
+          git commit -m "Update scraped data"
+          for i in 1 2 3; do
+            if git pull --rebase -X theirs origin main && git push; then
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            sleep 5
+          done
+          exit 1
