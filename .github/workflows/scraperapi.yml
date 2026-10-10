@@ -49,7 +49,7 @@ jobs:
           START_PAGE: ${{ inputs.start_page }}
           MAX_LISTING_PAGES: "100"
           MAX_RUNTIME_MIN: "330"
-        run: python Trip_api.py
+        run: python tripapi.py
 
       - name: Commit results
         if: always()
