@@ -36,8 +36,8 @@ def env_flag(name, default="0"):
     return (os.environ.get(name) or default).strip().lower() in ("1", "true", "yes", "y")
 
 
-START_PAGE = max(1, env_int("START_PAGE", 1))             # skip ahead (e.g. 16 if pages 1-15 are already done)
-MAX_LISTING_PAGES = env_int("MAX_LISTING_PAGES", 25)      # last listing page number to visit
+START_PAGE = max(1, env_int("START_PAGE", 14))             # skip ahead (e.g. 16 if pages 1-15 are already done)
+MAX_LISTING_PAGES = env_int("MAX_LISTING_PAGES", 200)      # last listing page number to visit
 MAX_RESTAURANTS = env_int("MAX_RESTAURANTS", 400)        # per run
 MAX_RUNTIME_MIN = env_int("MAX_RUNTIME_MIN", 330)        # stop cleanly before GitHub's 6h job limit
 CONCURRENCY = env_int("CONCURRENCY", 5)                  # parallel API requests
