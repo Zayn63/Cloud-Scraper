@@ -8,10 +8,10 @@ on:
         default: "https://www.tripadvisor.com/Restaurants-g295424-Dubai_Emirate_of_Dubai.html"
       start_page:
         description: "Listing page to start from (use 1 for a new area; higher to skip pages already done)"
-        default: "1"
+        default: "14"
       max_restaurants:
         description: "Max restaurants this run (20 = cheap test)"
-        default: "20"
+        default: "200"
       concurrency:
         description: "Parallel API requests (start at 5)"
         default: "5"
